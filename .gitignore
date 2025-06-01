@@ -1,0 +1,47 @@
+# Prerequisites *.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# vim swap files
+*.swp
+
+# text files for output
+*.txt
+
+# csv files for output
+*.csv
+
+.vscode
+# macOS system files
+.DS_Store
+
+run
+performance.png

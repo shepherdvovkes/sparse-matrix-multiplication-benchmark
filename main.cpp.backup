@@ -1,0 +1,160 @@
+/*
+ * This file is part of the Sparse Ternary Matrix Multiplication Project
+ * of the Advanced Systems Lab course 2025 at ETH Zurich.
+ *
+ * Modified for TCSC testing on Mac M1
+ */
+
+// number of runs for measuring the cycles of a function
+#define NUM_RUNS 20
+// comment this macro out for no warm-up
+#define DO_WARMUP_BEFORE_MEASURING
+// minimum number of cycles required for one measurement
+#define CYCLES_REQUIRED 1e8
+// number of times to repeat a measurement with each iteration running NUM_RUNS
+#define REP 50
+// numerical tolerance between computed and ground truth
+#define EPS (1e-6)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <vector>
+#include <iostream>
+
+#include "common.h"
+#include "measure.h"
+#include "dense/dense.h"
+#include "sparse/tcsc.h"
+#include <string>
+#include <fstream>
+
+#include "papi/my_papi.h"
+
+using namespace std;
+
+template<typename T>
+void build_and_check(T **a, int m, int n){
+    *a = static_cast<T *>(aligned_alloc(32, m * n * sizeof(T)));
+    if (!*a) {
+        printf("ERROR: allocation !!!");
+        exit(EXIT_FAILURE);
+    }
+}
+
+// Helper function to calculate FLOP count for sparse operations
+long long calculate_sparse_flops(const tcsc_t* W, int M, int N) {
+    // Each non-zero element contributes 1 multiply-add = 2 FLOPs
+    // Plus M*N additions for bias
+    return (long long)M * (W->n_elem_pos + W->n_elem_neg) * 2 + (long long)M * N;
+}
+
+int main(int argc, char **argv) {
+    cout << "Starting TCSC program for Mac M1! " << endl;
+
+    init_papi();
+
+    vector<tuple<int, int, int>> basicTestCases = {
+        {   1,  512,  2048},
+        {   1, 1024,  4096},
+        {   1, 2048,  8192},
+        {   1, 4096, 16384},
+        { 256,  512,  2048},
+        { 256, 1024,  4096},
+        { 256, 2048,  8192},
+    };
+
+    for (const auto& [M_ROW, K_LEN, N_COL] : basicTestCases) {
+        cout << "M=" << M_ROW << ", K=" << K_LEN << ", N=" << N_COL << ", Sparsity = 50%, General Sparsity." << endl;
+
+        dense_elem_t *Y;
+        dense_elem_t *refY;
+        const dense_t W_dense = init_rand_sparse(K_LEN, N_COL, 2);
+        const dense_t X = init_rand_dense(M_ROW, K_LEN);
+        const dense_t B = init_rand_dense(N_COL, 1);
+
+        build_and_check(&Y, M_ROW, N_COL);
+        build_and_check(&refY, M_ROW, N_COL);
+
+        tcsc_t *W_tsparse = tcsc_from_dense(W_dense, K_LEN, N_COL);
+
+        // Calculate FLOP counts
+        long long flops_gemm_basic = 2LL * M_ROW * N_COL * K_LEN + M_ROW * N_COL;
+        long long flops_sparse = calculate_sparse_flops(W_tsparse, M_ROW, N_COL);
+
+        // Test dense GEMM
+        start_flop_count();
+#ifdef DISABLE_PAPI
+        set_flop_count(flops_gemm_basic);
+#endif
+        gemm_basic(X, W_dense, B, refY, M_ROW, N_COL, K_LEN);
+        long long measured_flops_gemm = stop_flop_count();
+
+        // Test TCSC basic
+        start_flop_count();
+#ifdef DISABLE_PAPI
+        set_flop_count(flops_sparse);
+#endif
+        tcsc_sgemm_basic(X, W_tsparse, B, Y, M_ROW, N_COL, K_LEN);
+        long long measured_flops_basic = stop_flop_count();
+
+        if (!compare(Y, refY, M_ROW, N_COL)) {
+            printf("ERROR: basic_tcsc failed validation!!!\n");
+        }
+
+        build_and_check(&Y, M_ROW, N_COL);
+
+        // Test TCSC optimized
+        start_flop_count();
+#ifdef DISABLE_PAPI
+        set_flop_count(flops_sparse);
+#endif
+        tcsc_sgemm_optimized(X, W_tsparse, B, Y, M_ROW, N_COL, K_LEN);
+        long long measured_flops_opt = stop_flop_count();
+
+        if (!compare(Y, refY, M_ROW, N_COL)) {
+            printf("ERROR: optimized_tcsc failed validation!!!\n");
+        }
+
+        // Timing measurements
+        build_and_check(&Y, M_ROW, N_COL);
+        build_and_check(&refY, M_ROW, N_COL);
+
+        double cycles_gemm_basic = measure_cycles(gemm_basic, X, W_dense, B, refY, M_ROW, N_COL, K_LEN);
+        
+        build_and_check(&Y, M_ROW, N_COL);
+        double cycles_tsgemm_basic = measure_cycles(tcsc_sgemm_basic, X, W_tsparse, B, Y, M_ROW, N_COL, K_LEN);
+        
+        build_and_check(&Y, M_ROW, N_COL);
+        double cycles_tsgemm_opt = measure_cycles(tcsc_sgemm_optimized, X, W_tsparse, B, Y, M_ROW, N_COL, K_LEN);
+
+        printf(
+            "GEMM       cycles=%.0f, flops=%lld, performance=%.4f\n",
+            cycles_gemm_basic, measured_flops_gemm, (double)measured_flops_gemm/cycles_gemm_basic
+        );
+        printf(
+            "TCSC_basic cycles=%.0f, flops=%lld, performance=%.4f\n", 
+            cycles_tsgemm_basic, measured_flops_basic, (double)measured_flops_basic/cycles_tsgemm_basic
+        );
+        printf(
+            "TCSC_opt   cycles=%.0f, flops=%lld, performance=%.4f\n", 
+            cycles_tsgemm_opt, measured_flops_opt, (double)measured_flops_opt/cycles_tsgemm_opt
+        );
+
+        printf("Speedup basic vs dense: %.2fx\n", cycles_gemm_basic / cycles_tsgemm_basic);
+        printf("Speedup optimized vs basic: %.2fx\n", cycles_tsgemm_basic / cycles_tsgemm_opt);
+        printf("Overall speedup: %.2fx\n", cycles_gemm_basic / cycles_tsgemm_opt);
+        printf("---\n");
+
+        // Cleanup
+        free(Y);
+        free(refY);
+        free(W_dense);
+        free(X);
+        free(B);
+
+        // TCSC cleanup
+        tcsc_free(W_tsparse);
+    }
+
+    return 0;
+}
