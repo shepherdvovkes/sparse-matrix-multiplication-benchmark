@@ -1,3 +1,8 @@
+#!/bin/bash
+
+echo "=== Updating main.cpp to test PReLU optimizations ==="
+
+cat > main.cpp << 'EOF'
 /*
  * This file is part of the Sparse Ternary Matrix Multiplication Project
  * of the Advanced Systems Lab course 2025 at ETH Zurich.
@@ -454,3 +459,17 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+EOF
+
+echo "=== main.cpp updated with PReLU optimization testing! ==="
+echo ""
+echo "New features in main.cpp:"
+echo "1. Tests both PReLU optimization approaches"
+echo "2. Validates all PReLU versions against each other"
+echo "3. Comprehensive performance comparison table"
+echo "4. Shows which PReLU approach is faster"
+echo "5. Legacy output format maintained for compatibility"
+echo ""
+echo "PReLU parameter set to: 0.2f (configurable)"
+echo ""
+echo "Ready to test! Run: ./build_and_run_m1.sh"

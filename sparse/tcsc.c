@@ -173,3 +173,103 @@ void tcsc_free(tcsc_t *W) {
         free(W);
     }
 }
+
+// PReLU optimized version - separate loop approach
+// First compute matrix multiplication, then apply PReLU in separate pass
+void tcsc_sgemm_prelu_optimized_separate(
+    const dense_t X, const tcsc_t* W, const dense_t B, float a, dense_t Y,
+    int M, int N, int K
+) {
+    // Phase 1: Precompute bias in separate loop to reduce cache conflicts
+    for (int m = 0; m < M; ++m) {
+        for (int n = 0; n < N; ++n) {
+            Y[m * N + n] = B[n];
+        }
+    }
+    
+    // Phase 2: Sparse matrix multiplication with optimized loop order
+    for (int n = 0; n < N; ++n) {
+        // Process positive values for this column
+        int pos_start = W->col_start_pos[n];
+        int pos_end = W->col_start_pos[n + 1];
+        
+        for (int m = 0; m < M; ++m) {
+            float acc_pos = 0.0f;
+            // Local accumulation to reduce memory accesses
+            for (int k = pos_start; k < pos_end; ++k) {
+                acc_pos += X[m * K + W->row_index_pos[k]];
+            }
+            Y[m * N + n] += acc_pos;
+        }
+        
+        // Process negative values for this column
+        int neg_start = W->col_start_neg[n];
+        int neg_end = W->col_start_neg[n + 1];
+        
+        for (int m = 0; m < M; ++m) {
+            float acc_neg = 0.0f;
+            // Local accumulation to reduce memory accesses
+            for (int k = neg_start; k < neg_end; ++k) {
+                acc_neg += X[m * K + W->row_index_neg[k]];
+            }
+            Y[m * N + n] -= acc_neg;
+        }
+    }
+    
+    // Phase 3: Apply PReLU activation in separate optimized loop
+    // This allows for better vectorization and cache usage
+    for (int m = 0; m < M; ++m) {
+        for (int n = 0; n < N; ++n) {
+            float val = Y[m * N + n];
+            Y[m * N + n] = (val < 0.0f) ? a * val : val;
+        }
+    }
+}
+
+// PReLU optimized version - compute PReLU on-the-go
+// Apply PReLU immediately after computing each element
+void tcsc_sgemm_prelu_optimized_onthego(
+    const dense_t X, const tcsc_t* W, const dense_t B, float a, dense_t Y,
+    int M, int N, int K
+) {
+    // Precompute bias in separate loop to reduce cache conflicts
+    for (int m = 0; m < M; ++m) {
+        for (int n = 0; n < N; ++n) {
+            Y[m * N + n] = B[n];
+        }
+    }
+    
+    // Sparse matrix multiplication with PReLU applied on-the-go
+    // Column-major processing for better cache locality
+    for (int n = 0; n < N; ++n) {
+        // Process positive values for this column
+        int pos_start = W->col_start_pos[n];
+        int pos_end = W->col_start_pos[n + 1];
+        
+        for (int m = 0; m < M; ++m) {
+            float acc_pos = 0.0f;
+            // Local accumulation for positive values
+            for (int k = pos_start; k < pos_end; ++k) {
+                acc_pos += X[m * K + W->row_index_pos[k]];
+            }
+            Y[m * N + n] += acc_pos;
+        }
+        
+        // Process negative values for this column
+        int neg_start = W->col_start_neg[n];
+        int neg_end = W->col_start_neg[n + 1];
+        
+        for (int m = 0; m < M; ++m) {
+            float acc_neg = 0.0f;
+            // Local accumulation for negative values
+            for (int k = neg_start; k < neg_end; ++k) {
+                acc_neg += X[m * K + W->row_index_neg[k]];
+            }
+            Y[m * N + n] -= acc_neg;
+            
+            // Apply PReLU immediately after computing final value
+            float val = Y[m * N + n];
+            Y[m * N + n] = (val < 0.0f) ? a * val : val;
+        }
+    }
+}

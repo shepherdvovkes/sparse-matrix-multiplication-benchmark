@@ -33,6 +33,18 @@ void tcsc_sgemm_prelu_basic(
     int M, int N, int K
 );
 
+// PReLU optimized version - separate loop for PReLU computation
+void tcsc_sgemm_prelu_optimized_separate(
+    const dense_t X, const tcsc_t* W, const dense_t B, float a, dense_t Y,
+    int M, int N, int K
+);
+
+// PReLU optimized version - compute PReLU on-the-go
+void tcsc_sgemm_prelu_optimized_onthego(
+    const dense_t X, const tcsc_t* W, const dense_t B, float a, dense_t Y,
+    int M, int N, int K
+);
+
 void tcsc_free(tcsc_t *W);
 
 #endif
